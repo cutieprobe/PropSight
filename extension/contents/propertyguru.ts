@@ -20,6 +20,7 @@ export const config: PlasmoCSConfig = {
     "https://www.propertyguru.com.sg/property-for-rent*",
     "https://www.propertyguru.com.sg/listing/*",
     "https://www.propertyguru.com.sg/room-rental*",
+    "https://www.propertyguru.com.sg/map-search*",
   ],
   run_at: "document_idle",
 }
@@ -52,7 +53,11 @@ if (isSearchResultsPage()) {
 
 function isSearchResultsPage(): boolean {
   const p = window.location.pathname
-  return p.includes("/property-for-rent") || p.includes("/room-rental")
+  return p.includes("/property-for-rent") || p.includes("/room-rental") || p.includes("/map-search")
+}
+
+function isMapViewPage(): boolean {
+  return window.location.pathname.includes("/map-search")
 }
 
 function isListingDetailPage(): boolean {
@@ -188,7 +193,7 @@ function reInjectFromCache(id: string): void {
       if (!card) return
       if (card.querySelector(".propsight-tags:not(.propsight-loading-wrapper)")) return
       const tags = tagsToDisplay(hits[0].tags)
-      if (tags.length > 0) card.appendChild(createTagContainer(tags))
+      if (tags.length > 0) card.appendChild(createTagContainer(tags, isMapViewPage()))
     }
   })
 }
@@ -358,7 +363,15 @@ function findListingCards(): Element[] {
     return unique
   }
 
-  for (const sel of [".listing-card", ".listing-widget-new", '[class*="listingCard"]']) {
+  const selectorSets = [
+    ".listing-card",
+    ".listing-widget-new",
+    '[class*="listingCard"]',
+    '[class*="MapListingCard"]',
+    '[class*="map-listing"]',
+    '[class*="listing-map-card"]',
+  ]
+  for (const sel of selectorSets) {
     const cards = document.querySelectorAll(sel)
     if (cards.length > 0) return Array.from(cards)
   }
@@ -367,7 +380,9 @@ function findListingCards(): Element[] {
   const seen = new Set<Element>()
   const cards: Element[] = []
   links.forEach((link) => {
-    const card = link.closest('div[class*="card"], div[class*="listing"], li, article')
+    const card = link.closest(
+      'div[class*="card"], div[class*="listing"], div[class*="Card"], li, article'
+    )
     if (card && !seen.has(card)) {
       seen.add(card)
       cards.push(card)
@@ -506,7 +521,9 @@ function findBestCardElement(listingId: string): Element | null {
   const all = document.querySelectorAll(`[data-listing-id="${listingId}"]`)
   if (all.length === 0) {
     const link = document.querySelector(`a[href*="-${listingId}"]`)
-    return link?.closest('div[class*="card"], div[class*="listing"], li, article') ?? null
+    return link?.closest(
+      'div[class*="card"], div[class*="Card"], div[class*="listing"], li, article'
+    ) ?? null
   }
   if (all.length === 1) return all[0]
   let best: Element = all[0]
@@ -536,6 +553,7 @@ function injectSearchResultTags(result: ListingResult): void {
     return
   }
 
-  card.appendChild(createTagContainer(tags))
-  console.log(`[PropSight] ${result.id}: injected ${tags.length} tags`)
+  const compact = isMapViewPage()
+  card.appendChild(createTagContainer(tags, compact))
+  console.log(`[PropSight] ${result.id}: injected ${tags.length} tags${compact ? " (compact)" : ""}`)
 }

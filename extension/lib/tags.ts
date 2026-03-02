@@ -138,9 +138,9 @@ export function createTagElement(tag: TagDisplay): HTMLElement {
   return el
 }
 
-export function createTagContainer(tags: TagDisplay[]): HTMLElement {
+export function createTagContainer(tags: TagDisplay[], compact = false): HTMLElement {
   const container = document.createElement("div")
-  container.className = "propsight-tags"
+  container.className = compact ? "propsight-tags propsight-tags--compact" : "propsight-tags"
   tags.forEach((tag) => container.appendChild(createTagElement(tag)))
   return container
 }
@@ -242,6 +242,20 @@ export function injectStyles(): void {
     }
     @keyframes propsight-spin {
       to { transform: rotate(360deg); }
+    }
+    /* Compact layout for map-view sidebar cards */
+    .propsight-tags--compact {
+      gap: 3px;
+      padding: 4px 0;
+    }
+    .propsight-tags--compact::before {
+      font-size: 9px;
+      margin-right: 2px;
+    }
+    .propsight-tags--compact .propsight-tag {
+      padding: 1px 5px;
+      font-size: 10px;
+      border-radius: 8px;
     }
   `
   document.head.appendChild(style)
