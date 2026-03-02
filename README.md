@@ -25,7 +25,7 @@ The entire pipeline runs in the browser. There is no backend call, no LLM invoca
 ## Project Structure
 
 ```
-PropSense/
+PropSight/
 ├── extension/                 # Chrome extension (Plasmo framework)
 │   ├── contents/
 │   │   └── propertyguru.ts    # Content script: card detection, fetch, inject
