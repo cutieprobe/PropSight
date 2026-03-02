@@ -2,6 +2,11 @@
 
 Chrome extension that reveals hidden rental listing attributes on **PropertyGuru Singapore** using client-side pattern matching. No backend or API keys required.
 
+> **Left:** Colored tag pills injected below each listing card — cooking policy, landlord status, agent fee, amenities at a glance.
+> **Right:** Floating filter panel to narrow results by any extracted tag (e.g. "Heavy Cooking OK + No Landlord"). Shows 1/20 matching listings.
+
+![PropSight Demo — Tag Injection & Filter Panel](assets/demo.png)
+
 ## How It Works
 
 ```
