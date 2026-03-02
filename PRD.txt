@@ -1,0 +1,44 @@
+Product Requirements Document (PRD): PropSight AI
+Project Name: PropSight AI (SG Rental Copilot)
+Version: 1.0 (MVP)
+Status: Planning
+Author: Backend SDE (AI Transition)
+1. Executive Summary
+PropSight AI is a browser extension designed to empower renters in Singapore (specifically targeting the PropertyGuru platform). It bridges the gap between rigid platform filters and complex user needs by utilizing LLMs to extract hidden details from listing descriptions and enabling natural language search through intelligent parameter injection.
+Core Value Proposition:
+	•	Transparency: Reveal hidden "deal-breaker" constraints (e.g., "no cooking," "landlord staying," "address registration") instantly.
+	•	Efficiency: Convert vague natural language queries into precise platform filters and AI-ranked results.
+2. User Personas
+	•	The Expat Professional: Needs to know if "Address Registration" is possible (legal requirement). Values privacy ("No Live-in Landlord").
+	•	The Chinese Tenant: Specifically looks for "Cooking Allowed" (Heavy vs. Light) and "Visitor Policy".
+	•	The Remote Worker: Needs "Quiet Environment" and "High Floor/Windy" attributes often buried in text.
+3. Functional Requirements
+Feature 1: The "X-Ray" Tagger (Core MVP)
+User Story: As a user browsing a listing list, I want to see critical attributes (Cooking, Owner, Toilet) as visual tags on the card so I don't have to click into every page.
+	•	Requirements:
+	•	Auto-Extraction: Automatically detect listing descriptions on the DOM.
+	•	Tag Categories:
+	•	🔴 Red Flags: No Address, Live-in Landlord, Partition Room.
+	•	🟢 Green Flags: Heavy Cooking, Private Bath, No Agent Fee.
+	•	🟡 Info: Lease Term, Gender Preference.
+	•	Visual Injection: Insert colorful, pill-shaped tags next to the listing price/title.
+	•	Local Caching: Analyzed tags are cached locally in the browser (chrome.storage.local, 24h TTL). Revisiting a previously analyzed listing shows tags instantly without calling the backend.
+Feature 2: Smart Deep Search (Agentic Workflow)
+User Story: As a user, I want to type "Find me a master room near Clementi with no landlord and cooking allowed, under 4k" and get relevant results without manually adjusting 10 filters.
+	•	Requirements:
+	•	Natural Language Input: A floating search bar or injected input box on the UI.
+	•	Intent-to-Filter: Convert user query into PropertyGuru URL parameters (e.g., district_code=D05, maxprice=4000, freetext=cooking).
+	•	Automated Fetching: Extension automatically redirects to the filtered URL and fetches the Top 50 (approx. 2-3 pages) listings in the background.
+	•	AI Reranking: Re-order these 50 listings based on semantic similarity to the user's specific text requirements (e.g., "quiet", "big windows").
+	•	Top Picks Display: Inject a "PropSight Top Recommendations" carousel at the top of the results page.
+4. Non-Functional Requirements
+	•	Latency: Tags should appear within <2 seconds if locally cached, <5 seconds if live processing via LLM.
+	•	Stateless Backend: The backend is a pure LLM proxy — no database, no Redis. All caching is client-side.
+	•	Compliance: Must not trigger PropertyGuru's WAF/Anti-Bot protections (Cloudflare).
+	•	Cost Efficiency: Minimize LLM token usage via local caching and batch processing.
+	•	Privacy: No user data stored on the server. Analyzed tags are only stored in the user's own browser.
+5. UI/UX Guidelines
+	•	Minimalist: Do not clutter the existing interface.
+	•	Native Feel: Use UI components (fonts, colors) that blend with PropertyGuru’s design system.
+	•	Transparency: Clearly indicate which tags are AI-generated.
+

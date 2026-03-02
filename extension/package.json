@@ -1,0 +1,31 @@
+{
+  "name": "propsight",
+  "displayName": "PropSight - SG Rental Copilot",
+  "version": "0.1.0",
+  "description": "Smart rental listing tags for Singapore PropertyGuru",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "plasmo": "^0.89.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.3"
+  },
+  "manifest": {
+    "permissions": [
+      "storage"
+    ],
+    "host_permissions": [
+      "https://www.propertyguru.com.sg/*"
+    ]
+  }
+}

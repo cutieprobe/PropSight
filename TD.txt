@@ -1,0 +1,84 @@
+Technical Design Document (TD): PropSight AI System Architecture
+Target Role: AI Application Engineer
+Tech Stack: Python (FastAPI), React (Plasmo), OpenAI/Gemini, Redis/Supabase
+1. High-Level Architecture
+The system follows a Client-Server-AI pattern. The Browser Extension acts as the data collector and UI layer, while the Python Backend acts as the "Brain" and Cache manager.
+graph LR
+    A[Browser Extension (Plasmo)] -->|1. Listing Text / User Query| B(Python Backend FastAPI)
+    B -->|2. Check Cache| C{Redis/DB}
+    C -- Hit --> B
+    C -- Miss --> D[LLM Service (Gemini Flash)]
+    D -->|3. Extracted Tags / Embeddings| B
+    B -->|4. Save to Cache| C
+    B -->|5. JSON Response| A
+    A -->|6. DOM Injection| E[PropertyGuru Webpage]
+
+2. Frontend: Chrome Extension
+Framework: Plasmo (React + TypeScript + TailwindCSS)
+Modules:
+	•	DOM Observer (content_script):
+	•	Monitors the DOM for .listing-card elements.
+	•	Extracts listing_id, description_text, price, url.
+	•	Smart Controller:
+	•	Throttling: Implements "Human-Like Throttling" when fetching pagination (random delays between 1.5s - 3s).
+	•	API Client: Batches requests (sends 5-10 listing IDs at a time) to the backend to reduce network overhead.
+	•	Injector:
+	•	Renders React components (<TagPill />, <SmartSearchBar />) directly into the host page's DOM.
+3. Backend: Python Service
+Framework: FastAPI (Async/Await)
+Hosting: Vercel (Serverless) or Railway (Container)
+API Endpoints
+POST /v1/analyze (Batch Tagging)
+	•	Input: List[{ id: str, text: str }]
+	•	Logic:
+	•	Query DB for existing id.
+	•	Filter out hits.
+	•	Send misses to LLM (Gemini 1.5 Flash) with a strictly structured System Prompt.
+	•	System Prompt: "Extract: cooking_policy (Enum), owner_stay (Bool), address_reg (Bool). Return JSON."
+	•	Save new results to DB.
+	•	Return merged results (Cache Hits + New AI Results).
+POST /v1/smart-search (Intent Parsing)
+	•	Input: query: str (e.g., "Master room near NUS under 1500")
+	•	Logic:
+	•	Call LLM with PropertyGuru URL Schema definition.
+	•	LLM Task: Map NL query to district_code, property_type_code, minprice, maxprice.
+	•	Return structured JSON parameters for the Frontend to construct the redirect URL.
+POST /v1/rerank (Semantic Sorting)
+	•	Input: user_query: str, candidates: List[{id: str, text: str}]
+	•	Logic:
+	•	Generate Embedding for user_query.
+	•	Generate/Fetch Embeddings for candidates.
+	•	Calculate Cosine Similarity.
+	•	Return sorted list with similarity_score and match_reason.
+4. Data Layer & Caching
+Database Strategy: Supabase (PostgreSQL + pgvector) or Redis.
+Schema (Example for Postgres)
+Table: listings
+Type
+Description
+id
+VARCHAR (PK)
+PropertyGuru Listing ID
+raw_tags
+JSONB
+AI extracted tags
+embedding
+VECTOR(1536)
+Description embedding (for reranking)
+last_updated
+TIMESTAMP
+To expire old listings
+5. Security & Anti-Scraping Strategy
+	•	Client-Side Fetching: The Backend NEVER scrapes PropertyGuru directly. All HTML fetching is done by the Extension (User's IP, User's Cookies). The Backend only processes text sent by the Extension.
+	•	Rate Limiting: Backend limits requests per user-token to prevent abuse.
+	•	API Key Protection: LLM API Keys are stored in Backend Environment Variables (.env), never exposed to the Browser.
+6. Development Phase Roadmap
+	•	Phase 1 (MVP):
+	•	Setup Plasmo & FastAPI.
+	•	Implement /analyze endpoint with simple Prompts.
+	•	DOM Injection of Tags.
+	•	Phase 2 (Smart Search):
+	•	Implement /smart-search (URL injection).
+	•	Implement "Human-like" background fetching in Extension.
+	•	Implement /rerank logic.
+
