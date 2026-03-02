@@ -12,6 +12,8 @@ import {
   injectStyles,
 } from "~lib/tags"
 import { extractTagsFromText } from "~lib/rule-extractor"
+import { setTags } from "~lib/tag-store"
+import { initFilterPanel, applyFilters } from "~lib/filter-panel"
 
 // ── Plasmo content-script config ──────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ injectStyles()
 if (isSearchResultsPage()) {
   console.log("[PropSight] Search results page detected")
   observeSearchResults()
+  initFilterPanel()
 } else if (isListingDetailPage()) {
   console.log("[PropSight] Listing detail page detected")
   processDetailPage()
@@ -168,6 +171,10 @@ function processVisibleListings(): void {
     const info = extractCardInfo(card)
     if (!info) continue
 
+    if (!card.hasAttribute("data-listing-id")) {
+      card.setAttribute("data-listing-id", info.id)
+    }
+
     if (!processedListings.has(info.id)) {
       processedListings.add(info.id)
       card.appendChild(createLoadingEl(info.id))
@@ -191,6 +198,7 @@ function reInjectFromCache(id: string): void {
     if (hits.length > 0 && !isAllUnknown(hits[0].tags)) {
       const card = findBestCardElement(id)
       if (!card) return
+      setTags(id, hits[0].tags, card as HTMLElement)
       if (card.querySelector(".propsight-tags:not(.propsight-loading-wrapper)")) return
       const tags = tagsToDisplay(hits[0].tags)
       if (tags.length > 0) card.appendChild(createTagContainer(tags, isMapViewPage()))
@@ -208,6 +216,8 @@ async function processCardsWithCache(cards: CardInfo[]): Promise<void> {
   console.log(`[PropSight] Cache: ${validLocalHits.length} hits, ${afterLocal.length} misses, ${staleLocalIds.length} stale`)
 
   for (const result of validLocalHits) {
+    const cardInfo = cards.find((c) => c.id === result.id)
+    if (cardInfo) setTags(result.id, result.tags, cardInfo.card as HTMLElement)
     injectSearchResultTags(result)
     analysisComplete.add(result.id)
   }
@@ -277,6 +287,7 @@ async function fetchDescriptionsAndAnalyze(cards: CardInfo[]): Promise<void> {
           return
         }
         const tags = extractTagsFromText(desc)
+        setTags(c.id, tags, c.card as HTMLElement)
         allResults.push({ id: c.id, tags, cached: false })
       })
       .catch((err) => {
@@ -308,6 +319,8 @@ async function fetchDescriptionsAndAnalyze(cards: CardInfo[]): Promise<void> {
     document.getElementById(`propsight-loading-${c.id}`)?.remove()
     analysisComplete.add(c.id)
   }
+
+  applyFilters()
 }
 
 function extractOgDescriptionFromHtml(html: string): string {
@@ -551,6 +564,10 @@ function injectSearchResultTags(result: ListingResult): void {
   if (!card) {
     console.warn(`[PropSight] ${result.id}: card element not found in DOM`)
     return
+  }
+
+  if (!card.hasAttribute("data-listing-id")) {
+    card.setAttribute("data-listing-id", result.id)
   }
 
   const compact = isMapViewPage()

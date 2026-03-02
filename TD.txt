@@ -1,84 +1,394 @@
 Technical Design Document (TD): PropSight AI System Architecture
 Target Role: AI Application Engineer
-Tech Stack: Python (FastAPI), React (Plasmo), OpenAI/Gemini, Redis/Supabase
-1. High-Level Architecture
-The system follows a Client-Server-AI pattern. The Browser Extension acts as the data collector and UI layer, while the Python Backend acts as the "Brain" and Cache manager.
-graph LR
-    A[Browser Extension (Plasmo)] -->|1. Listing Text / User Query| B(Python Backend FastAPI)
-    B -->|2. Check Cache| C{Redis/DB}
-    C -- Hit --> B
-    C -- Miss --> D[LLM Service (Gemini Flash)]
-    D -->|3. Extracted Tags / Embeddings| B
-    B -->|4. Save to Cache| C
-    B -->|5. JSON Response| A
-    A -->|6. DOM Injection| E[PropertyGuru Webpage]
+Version: 2.0 — Phase 1 Shipped · Phase 2a In Progress
 
-2. Frontend: Chrome Extension
-Framework: Plasmo (React + TypeScript + TailwindCSS)
-Modules:
-	•	DOM Observer (content_script):
-	•	Monitors the DOM for .listing-card elements.
-	•	Extracts listing_id, description_text, price, url.
-	•	Smart Controller:
-	•	Throttling: Implements "Human-Like Throttling" when fetching pagination (random delays between 1.5s - 3s).
-	•	API Client: Batches requests (sends 5-10 listing IDs at a time) to the backend to reduce network overhead.
-	•	Injector:
-	•	Renders React components (<TagPill />, <SmartSearchBar />) directly into the host page's DOM.
-3. Backend: Python Service
-Framework: FastAPI (Async/Await)
-Hosting: Vercel (Serverless) or Railway (Container)
-API Endpoints
-POST /v1/analyze (Batch Tagging)
-	•	Input: List[{ id: str, text: str }]
-	•	Logic:
-	•	Query DB for existing id.
-	•	Filter out hits.
-	•	Send misses to LLM (Gemini 1.5 Flash) with a strictly structured System Prompt.
-	•	System Prompt: "Extract: cooking_policy (Enum), owner_stay (Bool), address_reg (Bool). Return JSON."
-	•	Save new results to DB.
-	•	Return merged results (Cache Hits + New AI Results).
-POST /v1/smart-search (Intent Parsing)
-	•	Input: query: str (e.g., "Master room near NUS under 1500")
-	•	Logic:
-	•	Call LLM with PropertyGuru URL Schema definition.
-	•	LLM Task: Map NL query to district_code, property_type_code, minprice, maxprice.
-	•	Return structured JSON parameters for the Frontend to construct the redirect URL.
-POST /v1/rerank (Semantic Sorting)
-	•	Input: user_query: str, candidates: List[{id: str, text: str}]
-	•	Logic:
-	•	Generate Embedding for user_query.
-	•	Generate/Fetch Embeddings for candidates.
-	•	Calculate Cosine Similarity.
-	•	Return sorted list with similarity_score and match_reason.
-4. Data Layer & Caching
-Database Strategy: Supabase (PostgreSQL + pgvector) or Redis.
-Schema (Example for Postgres)
-Table: listings
-Type
-Description
-id
-VARCHAR (PK)
-PropertyGuru Listing ID
-raw_tags
-JSONB
-AI extracted tags
-embedding
-VECTOR(1536)
-Description embedding (for reranking)
-last_updated
-TIMESTAMP
-To expire old listings
-5. Security & Anti-Scraping Strategy
-	•	Client-Side Fetching: The Backend NEVER scrapes PropertyGuru directly. All HTML fetching is done by the Extension (User's IP, User's Cookies). The Backend only processes text sent by the Extension.
-	•	Rate Limiting: Backend limits requests per user-token to prevent abuse.
-	•	API Key Protection: LLM API Keys are stored in Backend Environment Variables (.env), never exposed to the Browser.
-6. Development Phase Roadmap
-	•	Phase 1 (MVP):
-	•	Setup Plasmo & FastAPI.
-	•	Implement /analyze endpoint with simple Prompts.
-	•	DOM Injection of Tags.
-	•	Phase 2 (Smart Search):
-	•	Implement /smart-search (URL injection).
-	•	Implement "Human-like" background fetching in Extension.
-	•	Implement /rerank logic.
+═══════════════════════════════════════════════════════════════════════════════
+1. Tech Stack (Actual)
+═══════════════════════════════════════════════════════════════════════════════
 
+  Frontend:  Plasmo (React 18 + TypeScript) — Chrome Extension (MV3)
+  Backend:   Python FastAPI (async), OpenAI GPT-4o-mini
+  LLM:       OpenAI GPT-4o-mini (via openai SDK, json_object mode)
+  Scraping:  httpx (server-side), fetch() (client-side in extension)
+  Storage:   chrome.storage.local only — no server-side DB/Redis
+  Hosting:   Backend on Vercel/Railway (stateless)
+
+═══════════════════════════════════════════════════════════════════════════════
+2. High-Level Architecture (Current — Phase 1)
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌────────────────────────────┐
+  │  PropertyGuru Web Page     │
+  │  (propertyguru.com.sg)     │
+  └────────┬───────────────────┘
+           │ DOM observed by content script
+  ┌────────▼───────────────────┐
+  │  Chrome Extension (Plasmo) │
+  │                            │
+  │  ┌─ Content Script ──────┐ │
+  │  │ MutationObserver      │ │
+  │  │ → find listing cards  │ │
+  │  │ → check local cache   │ │
+  │  │ → fetch detail page   │ │     ┌─────────────────────────┐
+  │  │ → rule-extractor (regex)│ │──── │ chrome.storage.local    │
+  │  │ → inject tag pills    │ │     │ (24h TTL cache)         │
+  │  └───────────────────────┘ │     └─────────────────────────┘
+  │                            │
+  │  ┌─ Popup ───────────────┐ │
+  │  │ Clear cache button    │ │
+  │  └───────────────────────┘ │
+  └────────────────────────────┘
+
+  ┌────────────────────────────┐
+  │  Python Backend (FastAPI)  │  ← Currently unused by extension;
+  │                            │     available for LLM-based extraction
+  │  POST /v1/analyze          │
+  │  POST /v1/fetch-descriptions│
+  │  POST /v1/analyze-urls     │
+  │  GET  /health              │
+  └────────────────────────────┘
+
+Phase 1 uses a client-only architecture: the extension fetches listing pages
+directly (user's IP/cookies), extracts tags via regex rules, and caches
+results in chrome.storage.local. The backend is deployed but optional.
+
+═══════════════════════════════════════════════════════════════════════════════
+3. Frontend: Chrome Extension
+═══════════════════════════════════════════════════════════════════════════════
+
+Framework: Plasmo 0.89.x (React 18 + TypeScript, Chrome MV3)
+Permissions: storage, host_permissions: propertyguru.com.sg/*
+
+3.1 Content Script — propertyguru.ts
+
+  Match URLs:
+    - /property-for-rent*
+    - /listing/*
+    - /room-rental*
+    - /map-search*
+
+  Flow (Search Results Page):
+    1. injectStyles() → insert PropSight CSS
+    2. MutationObserver on document.body
+    3. For each new listing card:
+       a. Check chrome.storage.local cache (24h TTL)
+       b. If cache hit → inject tag pills immediately
+       c. If cache miss →
+          - Show "Analyzing…" spinner
+          - fetch() the listing detail page (user's browser context)
+          - Extract og:description or __NEXT_DATA__ from HTML
+          - Run extractTagsFromText() (regex rule-extractor)
+          - Inject tag pills, save to local cache
+    4. Concurrent fetches limited to 5, timeout 8s
+
+  Flow (Listing Detail Page):
+    1. Read og:description meta tag or DOM description section
+    2. Run extractTagsFromText()
+    3. Inject tags below page title/header
+
+  Card Detection Strategy (priority order):
+    1. [data-listing-id] attribute
+    2. .listing-card, .listing-widget-new, [class*="listingCard"]
+    3. a[href*="/listing/"] → closest card ancestor
+
+3.2 Rule Extractor — lib/rule-extractor.ts
+
+  Pure regex-based extraction. Each dimension has ordered rules — first
+  match wins. Zero API calls, zero latency.
+
+  Dimensions extracted:
+    cooking_policy      — 10 rules (no_cooking → light → heavy)
+    owner_occupancy     — 7 rules
+    room_type           — 10 rules (master, common, studio, whole_unit, partition)
+    bathroom            — 4 rules (private, shared)
+    agent_fee           — 6 rules
+    gender_preference   — 10 rules
+    address_registration— 5 rules
+    visitor_policy      — 6 rules
+    lease_term_months   — 5 patterns → numeric extraction
+    additional_flags    — 16 patterns (aircon, wifi, furnished, high floor, etc.)
+
+3.3 Tag Display — lib/tags.ts
+
+  Maps ListingTags → TagDisplay[] (label + color).
+  Priority: cooking > owner > address > visitor > agent > room > bath > lease > gender > flags.
+  Colors: red (restriction), green (benefit), yellow (caution), blue (info).
+  Filters out condo-level amenities (pool, gym, near MRT) from additional_flags.
+
+3.4 Types — lib/types.ts
+
+  ListingTags     — mirrors backend Pydantic model exactly
+  ListingResult   — { id, tags, cached }
+  TagDisplay      — { label, color }
+  isAllUnknown()  — utility to detect failed extraction
+
+3.5 Popup — popup.tsx
+
+  Minimal React popup: header, info text, "Clear Tag Cache" button.
+
+═══════════════════════════════════════════════════════════════════════════════
+4. Backend: Python Service
+═══════════════════════════════════════════════════════════════════════════════
+
+Framework: FastAPI (async), uvicorn
+LLM: OpenAI GPT-4o-mini via openai SDK (json_object response format)
+
+4.1 Existing API Endpoints
+
+  GET  /health
+    → { status: "ok" }
+
+  POST /v1/analyze
+    Input:  { listings: [{ id, text }] }  (max 20)
+    Logic:  Single listing → extract_tags(); batch → extract_tags_batch()
+            (batches of 5 per API call for efficiency)
+    Output: { results: [{ id, tags, cached: false }] }
+
+  POST /v1/fetch-descriptions
+    Input:  { urls: { id: url } }
+    Logic:  httpx GET each listing page, extract og:description
+            or __NEXT_DATA__ description. Concurrent limit 10.
+    Output: { descriptions: { id: text } }
+
+  POST /v1/analyze-urls
+    Input:  { urls: { id: url }, cookies?: string }
+    Logic:  fetch-descriptions → analyze (all-in-one)
+    Output: { results: [{ id, tags, cached: false }] }
+
+4.2 LLM Service — services/gemini.py (uses OpenAI, name is legacy)
+
+  Model: gpt-4o-mini, temperature 0.1, json_object mode
+  System prompt enforces strict enum values for all tag fields
+  Value coercion: alias maps handle LLM output variations
+  Concurrency: asyncio.Semaphore(10)
+  Retry: 2 retries with exponential backoff on 429
+
+4.3 Scraper — services/scraper.py
+
+  httpx async client with browser-like headers
+  Extraction priority: __NEXT_DATA__ JSON > og:description > meta description
+  Description truncated to 3000 chars
+
+4.4 Data Layer
+
+  No server-side persistence. Backend is stateless.
+  All caching is client-side in chrome.storage.local:
+    Key:    "propsight_cache"
+    Value:  { [listingId]: { tags: ListingTags, ts: number } }
+    TTL:    24 hours
+    Eviction: stale entries cleaned on write
+
+═══════════════════════════════════════════════════════════════════════════════
+5. Phase 2a: Tag Filter Panel — Technical Design
+═══════════════════════════════════════════════════════════════════════════════
+
+5.1 Overview
+
+  A floating, collapsible filter panel injected on search results pages.
+  Users select tag values → listings without matching tags are hidden.
+  Pure client-side — no backend changes.
+
+5.2 Architecture
+
+  ┌─────────────────────────────────────────────────────────┐
+  │  PropertyGuru Search Results Page                       │
+  │                                                         │
+  │  ┌─ PropSight Filter Panel (injected) ──────────────┐  │
+  │  │  Cooking:  [dropdown]   Owner: [dropdown]        │  │
+  │  │  Bath:     [dropdown]   Room:  [dropdown]        │  │
+  │  │  Addr Reg: [dropdown]   ...                      │  │
+  │  │  ☑ Hide unknown         Showing 12/25            │  │
+  │  └──────────────────────────────────────────────────┘  │
+  │                                                         │
+  │  ┌─ Listing Card (visible) ────────────────────────┐   │
+  │  │  [PropSight tags]                                │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │  ┌─ Listing Card (hidden by filter) ───────────────┐   │
+  │  │  display: none                                   │   │
+  │  └─────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────┘
+
+5.3 Data Flow
+
+  propertyguru.ts (existing)
+    │
+    │  After analyzing each card, publish tag data to shared state:
+    │  tagStore.set(listingId, tags)
+    │
+    ▼
+  tag-store.ts (new shared module)
+    │
+    │  In-memory Map<string, ListingTags>
+    │  EventTarget for change notifications
+    │  Exposes: get(), set(), getAll(), subscribe()
+    │
+    ▼
+  filter-panel.ts (new content script)
+    │
+    │  1. Inject filter panel DOM
+    │  2. Subscribe to tag store changes
+    │  3. On filter change → applyFilters()
+    │     - Iterate all [data-listing-id] cards
+    │     - Lookup tags from tag store
+    │     - Match against active filter criteria
+    │     - Toggle card visibility via CSS class
+    │  4. Update match counter
+    │
+    ▼
+  chrome.storage.local (existing)
+    │
+    │  Persist filter state: { propsight_filters: FilterState }
+    │  Restored on page load
+
+5.4 New Types — lib/types.ts additions
+
+  FilterState:
+    cooking_policy:       "all" | CookingPolicy values
+    owner_occupancy:      "all" | OwnerOccupancy values
+    bathroom:             "all" | BathroomType values
+    room_type:            "all" | RoomType values
+    address_registration: "all" | AllowanceStatus values
+    gender_preference:    "all" | GenderPreference values
+    visitor_policy:       "all" | VisitorPolicy values
+    hide_unknown:         boolean
+
+  FilterDimension:
+    key:     keyof FilterState
+    label:   string (display name)
+    options: { value: string, label: string }[]
+
+5.5 New Files
+
+  extension/lib/tag-store.ts
+    - Singleton in-memory store for listing tag data
+    - Bridges content script analysis → filter panel consumption
+    - Uses CustomEvent dispatch for loose coupling
+
+  extension/contents/filter-panel.ts (or integrated into propertyguru.ts)
+    - Plasmo content script, same URL matches
+    - Renders filter panel UI (vanilla DOM, matching PropSight styling)
+    - Registers event listeners for dropdown changes
+    - Implements applyFilters() core logic
+
+5.6 Filter Logic (applyFilters pseudocode)
+
+  for each card with [data-listing-id]:
+    tags = tagStore.get(listingId)
+    if tags is null:
+      visible = !filters.hide_unknown
+    else:
+      visible = true
+      for each dimension in activeFilters:
+        if filter[dimension] !== "all":
+          if tags[dimension] === "unknown":
+            visible = !filters.hide_unknown
+          else if tags[dimension] !== filter[dimension]:
+            visible = false
+    card.style.display = visible ? "" : "none"
+  update counter: "Showing X / Y listings"
+
+5.7 UI Design
+
+  Position: Fixed bottom-right or top sidebar (PropertyGuru has right sidebar
+  on desktop). Collapsible via toggle button.
+
+  Styling: Reuse PropSight color palette (indigo accent, pill-shaped
+  elements). Compact dropdowns. Dark header with "🔍 PropSight Filter".
+
+  Responsive: On map-search view, use a more compact layout.
+
+5.8 Filter State Persistence
+
+  Key:    "propsight_filters"
+  Value:  FilterState object
+  Scope:  Persists across page navigation within session
+  Reset:  "Clear Filters" button resets all to "all"
+
+5.9 Integration with propertyguru.ts
+
+  Minimal changes to existing content script:
+    1. Import tagStore
+    2. After extracting tags for a card, call tagStore.set(id, tags)
+    3. After cache hits, also call tagStore.set(id, tags)
+  The filter panel subscribes to store changes independently.
+
+═══════════════════════════════════════════════════════════════════════════════
+6. Phase 2b/2c: Smart Search & Reranking — Technical Outline
+═══════════════════════════════════════════════════════════════════════════════
+
+(Detailed design deferred until Phase 2a ships)
+
+6.1 Phase 2b — POST /v1/smart-search
+
+  Input:  { query: string }
+  Output: {
+    propertyguru_url: string,
+    url_params: { district_code, maxprice, minprice, ... },
+    tag_criteria: Partial<FilterState>
+  }
+
+  LLM converts natural language → PropertyGuru URL parameters via
+  structured output / function calling. A district_name → district_code
+  mapping table is provided in the system prompt.
+
+  Extension injects a search bar on the results page. On submit:
+    1. POST to /v1/smart-search
+    2. Redirect to propertyguru_url
+    3. Auto-apply tag_criteria to Phase 2a Filter Panel
+
+6.2 Phase 2c — POST /v1/rerank
+
+  Input:  { query: string, listings: [{ id, tags, text_snippet }] }
+  Output: { ranked: [{ id, score, reason }] }
+
+  Strategy: text-embedding-3-small for embedding, cosine similarity for
+  ranking. Top 5-10 results displayed in an injected carousel UI.
+
+═══════════════════════════════════════════════════════════════════════════════
+7. Security & Compliance
+═══════════════════════════════════════════════════════════════════════════════
+
+  • Client-side fetching: Extension fetches listing pages using user's own
+    browser context (IP, cookies). Backend only processes text sent to it.
+  • Rate limiting: Max 5 concurrent fetches, 8s timeout per request.
+  • API key protection: OpenAI key in backend .env, never exposed to browser.
+  • No user data: Backend is stateless. No user data stored server-side.
+  • Anti-bot: Human-like throttling, standard browser User-Agent headers.
+
+═══════════════════════════════════════════════════════════════════════════════
+8. Development Roadmap
+═══════════════════════════════════════════════════════════════════════════════
+
+  Phase 1 — X-Ray Tagger                              ✅ Complete
+    ✅ Plasmo extension scaffolding
+    ✅ Content script: DOM observation + card detection
+    ✅ Client-side regex rule-extractor (10 dimensions)
+    ✅ Client-side fetch → og:description extraction
+    ✅ Tag pill injection (4 color tiers)
+    ✅ Local cache (chrome.storage.local, 24h TTL)
+    ✅ Backend: FastAPI + OpenAI integration (optional)
+    ✅ Backend: server-side scraper (httpx)
+    ✅ Popup: clear cache
+
+  Phase 2a — Tag Filter Panel                          🔧 Next
+    ☐ Create tag-store.ts (shared in-memory store)
+    ☐ Integrate tag store into propertyguru.ts
+    ☐ Build filter panel UI (vanilla DOM)
+    ☐ Implement filter logic (show/hide cards)
+    ☐ "Hide unknown" toggle
+    ☐ Match counter
+    ☐ Filter state persistence (chrome.storage.local)
+    ☐ Compact mode for map-search view
+
+  Phase 2b — Smart Search                              📋 Planned
+    ☐ POST /v1/smart-search endpoint
+    ☐ District name → code mapping
+    ☐ LLM structured output for URL params
+    ☐ Search bar UI injection
+    ☐ Auto-redirect + filter activation
+
+  Phase 2c — AI Reranking                              📋 Planned
+    ☐ POST /v1/rerank endpoint
+    ☐ Embedding-based similarity scoring
+    ☐ Top Picks carousel UI
+    ☐ Match reason display
