@@ -1,11 +1,3 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-.venv/
-venv/
-
 # Node
 node_modules/
 .plasmo/
@@ -15,10 +7,10 @@ node_modules/
 build/
 chrome-mv3-dev/
 chrome-mv3-prod/
+*.tsbuildinfo
 
 # Environment
 .env
-!.env.example
 
 # IDE
 .vscode/
